@@ -1,0 +1,22 @@
+# Render blueprint. In the Render dashboard: New → Blueprint, point at this repo.
+# After the first deploy, fill in the secret env vars marked sync:false.
+services:
+  - type: web
+    name: esim-worker-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: BOT_TOKEN
+        sync: false
+      - key: MONGO_URI
+        sync: false
+      - key: DB_NAME
+        value: esimworker
+      - key: WEBHOOK_SECRET
+        generateValue: true
+      - key: ADMIN_IDS
+        sync: false
+      - key: TZ_OFFSET_HOURS
+        value: "3"
