@@ -73,6 +73,24 @@ def _is_admin(telegram_id: int) -> bool:
     return bool(op and op.get("role") == "admin")
 
 
+def admin_ids() -> set[int]:
+    """Telegram ids with admin rights: env-configured admins plus operators
+    whose stored role is 'admin'."""
+    ids: set[int] = set(config.ADMIN_IDS)
+    for op in db.list_operators():
+        if op.get("role") == "admin" and op.get("active", True):
+            tid = op.get("telegram_id")
+            if isinstance(tid, int):
+                ids.add(tid)
+    return ids
+
+
+def event_recipients(operator_id: int) -> list[int]:
+    """Telegram chats to notify about one event: the operator who triggered it
+    plus every admin. Deduped, so an operator who is also an admin gets one DM."""
+    return list({operator_id} | admin_ids())
+
+
 # ── event → operator message ─────────────────────────────────────────────────
 
 
@@ -84,6 +102,7 @@ def format_event_message(doc: dict) -> str:
     if doc.get("type") == "success":
         return (
             "✅ <b>Профиль установлен на eSIM</b>\n"
+            f"👤 Оператор: {_esc(doc.get('operator_name'))}\n"
             f"Оператор связи: {_esc(doc.get('smdp'))}\n"
             f"ICCID: <code>{_esc(doc.get('iccid'))}</code>\n"
             f"Устройство: {_esc(doc.get('device_model'))} · "
@@ -94,6 +113,7 @@ def format_event_message(doc: dict) -> str:
 
     lines = [
         "❌ <b>Накатка профиля не удалась</b>",
+        f"👤 Оператор: {_esc(doc.get('operator_name'))}",
         f"Причина: {_esc(doc.get('error_message'))}",
     ]
     if str(doc.get("error_kind") or "") in _BURNT_CODE_KINDS:
@@ -183,7 +203,8 @@ def _help_text(is_admin: bool) -> str:
             "🗓 <b>Сегодня</b> — события за текущий день.\n"
             "👥 <b>Операторы</b> — список доступа: добавить или удалить.\n"
             "📥 <b>Скачать приложение</b> — сборка esim-worker с вашей привязкой.\n\n"
-            "Операторам уведомления приходят сюда автоматически после каждой накатки."
+            "Уведомления о каждой накатке приходят сюда — и оператору, и всем "
+            "администраторам."
         )
     return (
         "ℹ️ <b>Справка</b>\n\n"
