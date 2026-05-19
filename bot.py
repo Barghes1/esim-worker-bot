@@ -8,7 +8,7 @@ Entry points (also in the native command menu):
     /me              — show your Telegram id and registration status.
 
 Admin-only screens (buttons): statistics, today's events, operator management.
-Text shortcuts kept for admins: /addoperator <id> <name>, /deloperator <id>.
+Text shortcuts kept for admins: /addoperator <id>, /deloperator <id>.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ BOT_COMMANDS = [
 ]
 
 # admin_id -> pending conversational action. Currently only "addop": the bot is
-# waiting for the admin to type "<telegram_id> <name>". In-memory is fine — on
-# the rare server restart the admin just taps the button again.
+# waiting for the admin to type the operator's <telegram_id>. In-memory is fine —
+# on the rare server restart the admin just taps the button again.
 _pending: dict[int, str] = {}
 
 
@@ -222,9 +222,10 @@ def _operators_text() -> str:
 def _addop_prompt_text() -> str:
     return (
         "➕ <b>Добавление оператора</b>\n\n"
-        "Пришлите одним сообщением: <code>telegram_id имя</code>\n"
-        "Например: <code>123456789 Иван</code>\n\n"
-        "Свой ID оператор узнаёт командой /me у этого бота."
+        "Пришлите <b>числовой Telegram ID</b> оператора одним сообщением.\n"
+        "Например: <code>123456789</code>\n\n"
+        "Имя подтянется из Telegram автоматически. Оператор должен заранее "
+        "нажать /start у бота — там же командой /me он узнаёт свой ID."
     )
 
 
@@ -240,15 +241,40 @@ def _del_confirm_text(op_id: int) -> str:
 # ── operator add/remove ──────────────────────────────────────────────────────
 
 
+def _resolve_operator_name(telegram_id: int) -> str | None:
+    """Best-effort display name from Telegram. None when the bot cannot see the
+    user — i.e. they have not pressed /start yet."""
+    try:
+        chat = telegram.get_chat(telegram_id)
+    except Exception:  # noqa: BLE001
+        return None
+    full = " ".join(p for p in (chat.get("first_name"), chat.get("last_name")) if p)
+    if full.strip():
+        return full.strip()
+    username = chat.get("username")
+    return f"@{username}" if username else None
+
+
 def _try_add_operator(raw: str) -> str:
+    """Register an operator by Telegram id alone — the display name is pulled
+    from Telegram. If the user has not started the bot yet, the id stands in
+    until they are added again."""
     parts = raw.split()
-    if len(parts) < 2 or not parts[0].lstrip("-").isdigit():
-        return ("⚠️ Неверный формат. Нужно: <code>telegram_id имя</code>\n"
-                "Например: <code>123456789 Иван</code>")
+    if not parts or not parts[0].lstrip("-").isdigit():
+        return ("⚠️ Пришлите числовой Telegram ID оператора.\n"
+                "Например: <code>123456789</code>")
     telegram_id = int(parts[0])
-    name = " ".join(parts[1:])
-    db.upsert_operator(telegram_id, name)
-    return f"✅ Оператор <b>{_esc(name)}</b> (<code>{telegram_id}</code>) добавлен."
+    name = _resolve_operator_name(telegram_id)
+    if name:
+        db.upsert_operator(telegram_id, name)
+        return f"✅ Оператор <b>{_esc(name)}</b> (<code>{telegram_id}</code>) добавлен."
+    db.upsert_operator(telegram_id, str(telegram_id))
+    return (
+        f"✅ Оператор <code>{telegram_id}</code> добавлен.\n"
+        "⚠️ Имя из Telegram подтянуть не удалось — скорее всего оператор ещё "
+        "не нажимал /start у бота. Когда нажмёт, добавьте его этим же ID "
+        "повторно — имя обновится."
+    )
 
 
 # ── update routing ───────────────────────────────────────────────────────────

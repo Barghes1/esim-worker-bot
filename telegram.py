@@ -98,3 +98,11 @@ def set_my_commands(commands: list[dict]) -> dict:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def get_chat(chat_id: int) -> dict:
+    """Fetch a chat object. For a user this succeeds only if they have already
+    started a chat with the bot — otherwise Telegram answers 'chat not found'."""
+    resp = requests.post(f"{_API}/getChat", json={"chat_id": chat_id}, timeout=15)
+    resp.raise_for_status()
+    return resp.json().get("result", {})
