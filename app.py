@@ -124,12 +124,14 @@ def post_events(req: EventsIn) -> dict:
 
         if db.insert_event(doc):
             accepted.append(event.client_event_id)
-            try:
-                telegram.send_message(req.operator_id, bot.format_event_message(doc))
-            except Exception as exc:  # noqa: BLE001
-                # Stats are saved; a failed DM (e.g. operator never pressed
-                # /start) must not fail the request.
-                print(f"notify failed for {req.operator_id}: {exc}")
+            message = bot.format_event_message(doc)
+            for chat_id in bot.event_recipients(req.operator_id):
+                try:
+                    telegram.send_message(chat_id, message)
+                except Exception as exc:  # noqa: BLE001
+                    # Stats are saved; a failed DM (e.g. a recipient never
+                    # pressed /start) must not fail the request.
+                    print(f"notify failed for {chat_id}: {exc}")
         else:
             duplicates.append(event.client_event_id)
 
