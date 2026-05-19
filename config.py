@@ -8,6 +8,7 @@ the same keys are set as service environment variables.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -30,7 +31,12 @@ _load_dotenv()
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
 MONGO_URI = os.environ.get("MONGO_URI", "")
 DB_NAME = os.environ.get("DB_NAME", "esimworker")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET", "")
+
+# The secret is embedded in the webhook URL path. Render's generateValue emits a
+# base64 string, whose '/', '+' and '=' break the {secret} path segment (a slash
+# makes the route un-matchable, so Telegram's updates 404). Strip to URL-safe
+# characters — done once here so the URL and the route comparison always agree.
+WEBHOOK_SECRET = re.sub(r"[^A-Za-z0-9_-]", "", os.environ.get("WEBHOOK_SECRET", ""))
 
 # Admin Telegram IDs — comma-separated. Admins can run /stats, /addoperator, etc.
 ADMIN_IDS = {
