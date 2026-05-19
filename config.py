@@ -53,6 +53,14 @@ PUBLIC_URL = (os.environ.get("RENDER_EXTERNAL_URL")
 # (3 = Moscow time).
 TZ_OFFSET_HOURS = int(os.environ.get("TZ_OFFSET_HOURS", "3") or "3")
 
+# Public URL of the common desktop-app build (a GitHub release asset). The
+# server fetches it once, then injects each operator's operator.json into a
+# copy at download time. Override via env var if the release asset moves.
+BASE_BUILD_URL = os.environ.get(
+    "BASE_BUILD_URL",
+    "https://github.com/Barghes1/esim-worker-bot/releases/download/app-v1/esim-worker-base.zip",
+)
+
 if not BOT_TOKEN or not MONGO_URI:
     print("WARNING: BOT_TOKEN and/or MONGO_URI are not set — "
           "set them in server/.env or as environment variables.",

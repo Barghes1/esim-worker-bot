@@ -16,9 +16,11 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 import bot
+import builds
 import config
 import db
 import telegram
@@ -132,6 +134,27 @@ def post_events(req: EventsIn) -> dict:
             duplicates.append(event.client_event_id)
 
     return {"ok": True, "accepted": accepted, "duplicates": duplicates}
+
+
+@app.get("/download/{operator_id}/{sig}")
+def download_app(operator_id: int, sig: str):
+    """Serve the desktop app personalized for one operator.
+
+    The bot hands out a signed link, so operator_id cannot be swapped. The
+    operator's operator.json is injected into a cached copy of the common build.
+    """
+    if not builds.valid_sig(operator_id, sig):
+        raise HTTPException(status_code=404, detail="not found")
+    op = db.get_operator(operator_id)
+    if not op or not op.get("active", True):
+        raise HTTPException(status_code=403, detail="operator not authorized")
+    try:
+        path = builds.personalized_zip(operator_id, op.get("name", ""))
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=503,
+                            detail="build temporarily unavailable") from exc
+    return FileResponse(path, media_type="application/zip",
+                        filename="esim-worker.zip")
 
 
 @app.post("/telegram/{secret}")
