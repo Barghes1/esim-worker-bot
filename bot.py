@@ -31,9 +31,9 @@ BOT_COMMANDS = [
     {"command": "me", "description": "Показать мой Telegram ID"},
 ]
 
-# admin_id -> pending conversational action. Currently only "addop": the bot is
-# waiting for the admin to type the operator's <telegram_id>. In-memory is fine —
-# on the rare server restart the admin just taps the button again.
+# admin_id -> pending conversational action: "addop" (waiting for an operator's
+# <telegram_id>) or "setlink:<id>" (waiting for that operator's download URL).
+# In-memory is fine — on the rare server restart the admin just taps again.
 _pending: dict[int, str] = {}
 
 
@@ -46,6 +46,10 @@ def _esc(value: object) -> str:
 
 def _btn(text: str, data: str) -> dict:
     return {"text": text, "callback_data": data}
+
+
+def _url_btn(text: str, url: str) -> dict:
+    return {"text": text, "url": url}
 
 
 def _local(dt: datetime) -> datetime:
@@ -108,6 +112,7 @@ def _main_menu_kb(is_admin: bool) -> dict:
     if is_admin:
         rows.append([_btn("📊 Статистика", "stats"), _btn("🗓 Сегодня", "today")])
         rows.append([_btn("👥 Операторы", "operators")])
+    rows.append([_btn("📥 Скачать приложение", "download")])
     rows.append([_btn("🆔 Мой ID", "me"), _btn("ℹ️ Помощь", "help")])
     return {"inline_keyboard": rows}
 
@@ -120,7 +125,7 @@ def _operators_kb() -> dict:
     rows: list[list[dict]] = []
     for op in db.list_operators():
         label = op.get("name") or str(op.get("telegram_id"))
-        rows.append([_btn(f"🗑 {label}", f"delop:{op.get('telegram_id')}")])
+        rows.append([_btn(f"👤 {label}", f"op:{op.get('telegram_id')}")])
     rows.append([_btn("➕ Добавить оператора", "addop")])
     rows.append([_btn("⬅️ Главное меню", "menu")])
     return {"inline_keyboard": rows}
@@ -129,12 +134,32 @@ def _operators_kb() -> dict:
 def _del_confirm_kb(op_id: int) -> dict:
     return {"inline_keyboard": [
         [_btn("✅ Да, удалить", f"delyes:{op_id}")],
-        [_btn("⬅️ Отмена", "operators")],
+        [_btn("⬅️ Отмена", f"op:{op_id}")],
     ]}
 
 
 def _cancel_kb() -> dict:
     return {"inline_keyboard": [[_btn("⬅️ Отмена", "operators")]]}
+
+
+def _operator_actions_kb(op_id: int) -> dict:
+    return {"inline_keyboard": [
+        [_btn("🔗 Ссылка на сборку", f"setlink:{op_id}")],
+        [_btn("🗑 Удалить", f"delop:{op_id}")],
+        [_btn("⬅️ К списку", "operators")],
+    ]}
+
+
+def _setlink_cancel_kb(op_id: int) -> dict:
+    return {"inline_keyboard": [[_btn("⬅️ Отмена", f"op:{op_id}")]]}
+
+
+def _download_kb(url: str | None) -> dict:
+    rows: list[list[dict]] = []
+    if url:
+        rows.append([_url_btn("⬇️ Скачать", url)])
+    rows.append([_btn("⬅️ Главное меню", "menu")])
+    return {"inline_keyboard": rows}
 
 
 # ── screen texts ─────────────────────────────────────────────────────────────
@@ -167,16 +192,34 @@ def _help_text(is_admin: bool) -> str:
             "Бот ведёт учёт накаток eSIM.\n\n"
             "📊 <b>Статистика</b> — сводка успехов и ошибок.\n"
             "🗓 <b>Сегодня</b> — события за текущий день.\n"
-            "👥 <b>Операторы</b> — список доступа: добавить или удалить.\n\n"
+            "👥 <b>Операторы</b> — доступ, удаление и ссылка на сборку оператора.\n"
+            "📥 <b>Скачать приложение</b> — ваша персональная сборка esim-worker.\n\n"
             "Операторам уведомления приходят сюда автоматически после каждой накатки."
         )
     return (
         "ℹ️ <b>Справка</b>\n\n"
         "Сюда автоматически приходят уведомления об установке eSIM-профилей — "
         "после каждой накатки в приложении.\n\n"
+        "📥 <b>Скачать приложение</b> — ваша персональная сборка esim-worker.\n"
         "🆔 <b>Мой ID</b> — ваш Telegram ID, его нужно передать администратору "
         "для регистрации."
     )
+
+
+def _download_text(telegram_id: int) -> str:
+    op = db.get_operator(telegram_id)
+    if not op or not op.get("active", True):
+        return ("📥 <b>Скачать приложение</b>\n\n"
+                "⚠️ Вы не зарегистрированы в системе учёта. Передайте свой ID "
+                "(команда /me) администратору.")
+    if op.get("download_url"):
+        return ("📥 <b>Скачать приложение</b>\n\n"
+                "Ваша персональная сборка esim-worker готова — нажмите кнопку "
+                "ниже.\n\nПосле скачивания распакуйте архив целиком и запустите "
+                "<code>esim-worker.exe</code> из папки.")
+    return ("📥 <b>Скачать приложение</b>\n\n"
+            "⏳ Ваша персональная сборка ещё готовится. Обратитесь к "
+            "администратору.")
 
 
 def _stats_text() -> str:
@@ -229,6 +272,30 @@ def _addop_prompt_text() -> str:
     )
 
 
+def _operator_actions_text(op_id: int) -> str:
+    op = db.get_operator(op_id)
+    if not op:
+        return "Оператор не найден."
+    url = op.get("download_url")
+    return (
+        f"👤 <b>{_esc(op.get('name'))}</b>\n"
+        f"ID: <code>{op_id}</code>\n"
+        f"🔗 Ссылка на сборку: {_esc(url) if url else 'не задана'}\n\n"
+        "Выберите действие:"
+    )
+
+
+def _setlink_prompt_text(op_id: int) -> str:
+    op = db.get_operator(op_id)
+    name = op.get("name") if op else op_id
+    return (
+        f"🔗 <b>Ссылка на сборку</b> — {_esc(name)}\n\n"
+        "Пришлите одним сообщением прямую ссылку на скачивание сборки "
+        "(например, ассет из GitHub Releases). Должна начинаться с "
+        "<code>http://</code> или <code>https://</code>."
+    )
+
+
 def _del_confirm_text(op_id: int) -> str:
     op = db.get_operator(op_id)
     name = op.get("name") if op else op_id
@@ -277,6 +344,17 @@ def _try_add_operator(raw: str) -> str:
     )
 
 
+def _try_set_download_url(op_id: int, raw: str) -> str:
+    """Validate and store a per-operator app download URL."""
+    url = raw.strip()
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return ("⚠️ Это не похоже на ссылку. Нужен прямой URL, начинающийся "
+                "с <code>http://</code> или <code>https://</code>.")
+    if not db.set_download_url(op_id, url):
+        return f"Оператор <code>{op_id}</code> в базе не найден."
+    return f"✅ Ссылка на сборку сохранена для оператора <code>{op_id}</code>."
+
+
 # ── update routing ───────────────────────────────────────────────────────────
 
 
@@ -299,12 +377,19 @@ def _handle_message(msg: dict | None) -> None:
 
     is_admin = _is_admin(from_id)
 
-    # Admin typed the operator details we were waiting for.
-    if not text.startswith("/") and _pending.get(from_id) == "addop":
+    # Admin typed the input for a pending conversational action.
+    pending = _pending.get(from_id)
+    if not text.startswith("/") and pending:
         _pending.pop(from_id, None)
         if not is_admin:
             return
-        telegram.send_message(chat_id, _try_add_operator(text), reply_markup=_operators_kb())
+        if pending == "addop":
+            telegram.send_message(chat_id, _try_add_operator(text),
+                                  reply_markup=_operators_kb())
+        elif pending.startswith("setlink:"):
+            op_id = int(pending.split(":", 1)[1])
+            telegram.send_message(chat_id, _try_set_download_url(op_id, text),
+                                  reply_markup=_operator_actions_kb(op_id))
         return
 
     if not text.startswith("/"):
@@ -365,7 +450,7 @@ def _handle_callback(cq: dict) -> None:
 
     notice = ""
     admin_only = (data in ("stats", "today", "operators", "addop")
-                  or data.startswith("delop:") or data.startswith("delyes:"))
+                  or data.startswith(("op:", "delop:", "delyes:", "setlink:")))
 
     if admin_only and not is_admin:
         notice = "Только для администраторов"
@@ -375,6 +460,10 @@ def _handle_callback(cq: dict) -> None:
         show(_identity_text(from_id), _back_kb())
     elif data == "help":
         show(_help_text(is_admin), _back_kb())
+    elif data == "download":
+        op = db.get_operator(from_id)
+        url = op.get("download_url") if op and op.get("active", True) else None
+        show(_download_text(from_id), _download_kb(url))
     elif data == "stats":
         show(_stats_text(), _back_kb())
     elif data == "today":
@@ -384,6 +473,15 @@ def _handle_callback(cq: dict) -> None:
     elif data == "addop":
         _pending[from_id] = "addop"
         show(_addop_prompt_text(), _cancel_kb())
+    elif data.startswith("op:"):
+        op_id = data.split(":", 1)[1]
+        if op_id.lstrip("-").isdigit():
+            show(_operator_actions_text(int(op_id)), _operator_actions_kb(int(op_id)))
+    elif data.startswith("setlink:"):
+        op_id = data.split(":", 1)[1]
+        if op_id.lstrip("-").isdigit():
+            _pending[from_id] = f"setlink:{op_id}"
+            show(_setlink_prompt_text(int(op_id)), _setlink_cancel_kb(int(op_id)))
     elif data.startswith("delop:"):
         op_id = data.split(":", 1)[1]
         if op_id.lstrip("-").isdigit():

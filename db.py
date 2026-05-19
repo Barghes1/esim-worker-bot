@@ -58,6 +58,15 @@ def delete_operator(telegram_id: int) -> bool:
     return operators.delete_one({"telegram_id": int(telegram_id)}).deleted_count > 0
 
 
+def set_download_url(telegram_id: int, url: str) -> bool:
+    """Attach a per-operator app download URL. False if no such operator."""
+    result = operators.update_one(
+        {"telegram_id": int(telegram_id)},
+        {"$set": {"download_url": url}},
+    )
+    return result.matched_count > 0
+
+
 def list_operators() -> list[dict]:
     return list(operators.find().sort("name", ASCENDING))
 
