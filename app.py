@@ -69,6 +69,7 @@ class EventIn(BaseModel):
     code_tail: str | None = None
     error_kind: str | None = None
     error_message: str | None = None
+    timings: dict[str, float] | None = None
     client_event_id: str
     app_ts: str | None = None
 

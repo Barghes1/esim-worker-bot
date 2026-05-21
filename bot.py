@@ -94,22 +94,61 @@ def event_recipients(operator_id: int) -> list[int]:
 # ── event → operator message ─────────────────────────────────────────────────
 
 
+_TIMING_LABELS = [
+    ("download", "Загрузка с SM-DP+"),
+    ("notify", "Нотификация оператору"),
+    ("cleanup", "Очистка старых профилей"),
+    ("enable", "Активация профиля"),
+    ("list_before", "Опрос чипа до"),
+    ("list_after", "Опрос чипа после"),
+]
+
+
+def _format_timings(timings: dict | None) -> str:
+    """Render a per-phase timing block. Empty string when nothing was reported."""
+    if not isinstance(timings, dict):
+        return ""
+    total = timings.get("total")
+    rows: list[str] = []
+    accounted = 0.0
+    for key, label in _TIMING_LABELS:
+        val = timings.get(key)
+        if not isinstance(val, (int, float)) or val <= 0.05:
+            continue
+        rows.append(f"   • {label}: {val:.1f}с")
+        accounted += float(val)
+    if isinstance(total, (int, float)) and total > 0:
+        other = total - accounted
+        if other >= 0.5:
+            rows.append(f"   • Прочее: {other:.1f}с")
+        header = f"⏱ Итого: {float(total):.1f}с"
+    elif rows:
+        header = "⏱ Тайминги"
+    else:
+        return ""
+    return "\n".join([header, *rows])
+
+
 def format_event_message(doc: dict) -> str:
     """Render a stored event document as the HTML message the operator sees."""
     created = doc.get("created_at")
     when = _local(created).strftime("%d.%m.%Y %H:%M") if isinstance(created, datetime) else "—"
+    timings_block = _format_timings(doc.get("timings"))
 
     if doc.get("type") == "success":
-        return (
-            "✅ <b>Профиль установлен на eSIM</b>\n"
-            f"👤 Оператор: {_esc(doc.get('operator_name'))}\n"
-            f"Оператор связи: {_esc(doc.get('smdp'))}\n"
-            f"ICCID: <code>{_esc(doc.get('iccid'))}</code>\n"
+        lines = [
+            "✅ <b>Профиль установлен на eSIM</b>",
+            f"👤 Оператор: {_esc(doc.get('operator_name'))}",
+            f"Оператор связи: {_esc(doc.get('smdp'))}",
+            f"ICCID: <code>{_esc(doc.get('iccid'))}</code>",
             f"Устройство: {_esc(doc.get('device_model'))} · "
-            f"IMEI <code>{_esc(doc.get('imei'))}</code>\n"
-            f"Ридер: {_esc(doc.get('reader_label'))}\n"
-            f"🕒 {when}"
-        )
+            f"IMEI <code>{_esc(doc.get('imei'))}</code>",
+            f"Ридер: {_esc(doc.get('reader_label'))}",
+        ]
+        if timings_block:
+            lines.append(timings_block)
+        lines.append(f"🕒 {when}")
+        return "\n".join(lines)
 
     lines = [
         "❌ <b>Накатка профиля не удалась</b>",
@@ -121,6 +160,8 @@ def format_event_message(doc: dict) -> str:
     lines.append(f"Оператор связи: {_esc(doc.get('smdp'))}")
     if doc.get("code_tail"):
         lines.append(f"QR: …{_esc(doc.get('code_tail'))}")
+    if timings_block:
+        lines.append(timings_block)
     lines.append(f"🕒 {when}")
     return "\n".join(lines)
 
